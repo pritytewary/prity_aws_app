@@ -53,5 +53,3 @@ After deployment, test the endpoints:
 
 - Health check: `https://your-app-runner-domain/healthz`
 - Root endpoint: `https://your-app-runner-domain/`
-
-add
