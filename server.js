@@ -6,6 +6,9 @@ const port = process.env.PORT || 8080;
 app.get("/healthz", (req, res) => {
   res.status(200).send("ok");
 });
+app.get("/hello", (req, res) => {
+  res.status(200).send("Hello World");
+});
 
 // Root endpoint
 app.get("/", (req, res) => {
