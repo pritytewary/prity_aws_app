@@ -1,0 +1,144 @@
+name: Build & Deploy to App Runner (ECR)
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  SERVICE_NAME: ${{ vars.SERVICE_NAME }}
+  IMAGE_TAG: ${{ github.sha }}
+  GITHUB_ACTION_ROLE: P_GithubActionsAppRunnerDeployRole
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTION_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          # Build Docker image
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+
+          # Push image to ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Create or update App Runner service
+        id: apprunner-deploy
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+          AWS_ACCOUNT_ID: ${{ env.AWS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          ECR_ACCESS_ROLE_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:role/P_AppRunnerECRAccessRole"
+          IMAGE_ID="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+          # Check if service exists
+          SVC_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='${SERVICE_NAME}'].ServiceArn | [0]" \
+            --output text)
+
+          # Create source configuration
+          SRC_CFG='{
+            "ImageRepository": {
+              "ImageIdentifier": "'${IMAGE_ID}'",
+              "ImageRepositoryType": "ECR",
+              "ImageConfiguration": {
+                "Port": "3000",
+                "RuntimeEnvironmentVariables": [
+                  {"Name": "APP_ENV", "Value": "prod"},
+                  {"Name": "NODE_ENV", "Value": "production"}
+                ]
+              }
+            },
+            "AuthenticationConfiguration": {
+              "AccessRoleArn": "'${ECR_ACCESS_ROLE_ARN}'"
+            },
+            "AutoDeploymentsEnabled": true
+          }'
+
+          # Create or update service
+          if [ "$SVC_ARN" = "None" ] || [ -z "$SVC_ARN" ]; then
+            echo "Creating new App Runner service..."
+            aws apprunner create-service \
+              --service-name "${SERVICE_NAME}" \
+              --source-configuration "${SRC_CFG}" \
+              --health-check-configuration "Protocol=HTTP,Path=/healthz,Interval=10,Timeout=5,HealthyThreshold=1,UnhealthyThreshold=3" \
+              --instance-configuration "Cpu=0.25,Memory=0.5" \
+              --tags Key=Environment,Value=Production Key=Project,Value=AppRunnerDemo
+          else
+            echo "Updating existing App Runner service..."
+            aws apprunner update-service \
+              --service-arn "${SVC_ARN}" \
+              --source-configuration "${SRC_CFG}"
+          fi
+
+      - name: Wait for service to be ready
+        env:
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+        run: |
+          echo "Waiting for service to be ready..."
+          aws apprunner wait service-updated \
+            --service-arn $(aws apprunner list-services \
+              --query "ServiceSummaryList[?ServiceName=='${SERVICE_NAME}'].ServiceArn | [0]" \
+              --output text)
+
+      - name: Get service URL
+        id: service-url
+        env:
+          SERVICE_NAME: ${{ env.SERVICE_NAME }}
+        run: |
+          SERVICE_URL=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='${SERVICE_NAME}'].ServiceUrl | [0]" \
+            --output text)
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+          echo "Service URL: $SERVICE_URL"
+
+      - name: Test health endpoint
+        env:
+          SERVICE_URL: ${{ steps.service-url.outputs.url }}
+        run: |
+          echo "Testing health endpoint..."
+          sleep 30  # Wait for service to fully start
+          curl -f "$SERVICE_URL/healthz" || exit 1
+          echo "Health check passed!"
+
+      - name: Show deployment summary
+        run: |
+          echo "🚀 Deployment completed successfully!"
+          echo "Service URL: ${{ steps.service-url.outputs.url }}"
+          echo "Image: ${{ steps.build-image.outputs.image }}"
+          echo "Health check: ${{ steps.service-url.outputs.url }}/healthz"
