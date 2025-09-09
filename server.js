@@ -14,6 +14,9 @@ app.get("/test", (req, res) => {
   res.status(200).send("Test");
 });
 
+app.get("/test2", (req, res) => {
+  res.status(200).send("Its Working");
+});
 // Root endpoint
 app.get("/", (req, res) => {
   res.json({
