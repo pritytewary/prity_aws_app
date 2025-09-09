@@ -118,7 +118,21 @@ jobs:
             
             if [ "$SERVICE_STATUS" = "OPERATION_IN_PROGRESS" ]; then
               echo "Service is currently updating. Waiting for operation to complete..."
-              aws apprunner wait service-updated --service-arn "${SVC_ARN}"
+              # Wait for operation to complete
+              MAX_WAIT=300  # 5 minutes
+              WAIT_COUNT=0
+              while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+                CURRENT_STATUS=$(aws apprunner describe-service \
+                  --service-arn "${SVC_ARN}" \
+                  --query "Service.Status" \
+                  --output text)
+                if [ "$CURRENT_STATUS" != "OPERATION_IN_PROGRESS" ]; then
+                  echo "Operation completed with status: $CURRENT_STATUS"
+                  break
+                fi
+                sleep 10
+                WAIT_COUNT=$((WAIT_COUNT + 10))
+              done
               echo "Previous operation completed. Proceeding with update..."
             fi
             
@@ -148,7 +162,21 @@ jobs:
                   
                   if [ "$SERVICE_STATUS" = "OPERATION_IN_PROGRESS" ]; then
                     echo "Service still in progress. Waiting for completion..."
-                    aws apprunner wait service-updated --service-arn "${SVC_ARN}"
+                    # Wait for operation to complete
+                    MAX_WAIT=300  # 5 minutes
+                    WAIT_COUNT=0
+                    while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+                      CURRENT_STATUS=$(aws apprunner describe-service \
+                        --service-arn "${SVC_ARN}" \
+                        --query "Service.Status" \
+                        --output text)
+                      if [ "$CURRENT_STATUS" != "OPERATION_IN_PROGRESS" ]; then
+                        echo "Operation completed with status: $CURRENT_STATUS"
+                        break
+                      fi
+                      sleep 10
+                      WAIT_COUNT=$((WAIT_COUNT + 10))
+                    done
                   fi
                 else
                   echo "Failed to update service after $MAX_RETRIES attempts"
@@ -163,10 +191,46 @@ jobs:
           SERVICE_NAME: ${{ env.SERVICE_NAME }}
         run: |
           echo "Waiting for service to be ready..."
-          aws apprunner wait service-updated \
-            --service-arn $(aws apprunner list-services \
-              --query "ServiceSummaryList[?ServiceName=='${SERVICE_NAME}'].ServiceArn | [0]" \
+          SVC_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='${SERVICE_NAME}'].ServiceArn | [0]" \
+            --output text)
+
+          if [ "$SVC_ARN" = "None" ] || [ -z "$SVC_ARN" ]; then
+            echo "Service not found!"
+            exit 1
+          fi
+
+          echo "Service ARN: $SVC_ARN"
+
+          # Wait for service to be in RUNNING state
+          MAX_WAIT_TIME=600  # 10 minutes
+          WAIT_TIME=0
+          INTERVAL=30
+
+          while [ $WAIT_TIME -lt $MAX_WAIT_TIME ]; do
+            SERVICE_STATUS=$(aws apprunner describe-service \
+              --service-arn "$SVC_ARN" \
+              --query "Service.Status" \
               --output text)
+            
+            echo "Current service status: $SERVICE_STATUS (waited ${WAIT_TIME}s)"
+            
+            if [ "$SERVICE_STATUS" = "RUNNING" ]; then
+              echo "Service is now running!"
+              break
+            elif [ "$SERVICE_STATUS" = "CREATE_FAILED" ] || [ "$SERVICE_STATUS" = "UPDATE_FAILED" ]; then
+              echo "Service failed with status: $SERVICE_STATUS"
+              exit 1
+            fi
+            
+            sleep $INTERVAL
+            WAIT_TIME=$((WAIT_TIME + INTERVAL))
+          done
+
+          if [ $WAIT_TIME -ge $MAX_WAIT_TIME ]; then
+            echo "Timeout waiting for service to be ready"
+            exit 1
+          fi
 
       - name: Get service URL
         id: service-url
