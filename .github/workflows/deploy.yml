@@ -86,10 +86,10 @@ jobs:
               "ImageRepositoryType": "ECR",
               "ImageConfiguration": {
                 "Port": "3000",
-                "RuntimeEnvironmentVariables": [
-                  {"Name": "APP_ENV", "Value": "prod"},
-                  {"Name": "NODE_ENV", "Value": "production"}
-                ]
+                "RuntimeEnvironmentVariables": {
+                  "APP_ENV": "prod",
+                  "NODE_ENV": "production"
+                }
               }
             },
             "AuthenticationConfiguration": {
