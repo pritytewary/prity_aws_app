@@ -1,0 +1,43 @@
+{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Sid": "AllowECRLogin",
+			"Effect": "Allow",
+			"Action": [
+				"ecr:GetAuthorizationToken"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "AllowECRImagePush",
+			"Effect": "Allow",
+			"Action": [
+				"ecr:BatchCheckLayerAvailability",
+				"ecr:CompleteLayerUpload",
+				"ecr:InitiateLayerUpload",
+				"ecr:PutImage",
+				"ecr:UploadLayerPart"
+			],
+			"Resource": "arn:aws:ecr:ap-northeast-1:604100153348:repository/prity_aws_app_ecr"
+		},
+		{
+			"Sid": "AllowAppRunnerActions",
+			"Effect": "Allow",
+			"Action": [
+				"apprunner:ListServices",
+				"apprunner:DescribeService",
+				"apprunner:CreateService",
+				"apprunner:UpdateService",
+				"apprunner:StartDeployment"
+			],
+			"Resource": "*"
+		},
+		{
+			"Sid": "AllowPassingECRAccessRole",
+			"Effect": "Allow",
+			"Action": "iam:PassRole",
+			"Resource": "arn:aws:iam::604100153348:role/P_AppRunnerECRAccessRole"
+		}
+	]
+}
