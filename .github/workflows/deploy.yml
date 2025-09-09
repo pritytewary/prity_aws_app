@@ -108,10 +108,54 @@ jobs:
               --instance-configuration "Cpu=0.25,Memory=0.5" \
               --tags Key=Environment,Value=Production Key=Project,Value=AppRunnerDemo
           else
-            echo "Updating existing App Runner service..."
-            aws apprunner update-service \
+            echo "Checking service status before update..."
+            SERVICE_STATUS=$(aws apprunner describe-service \
               --service-arn "${SVC_ARN}" \
-              --source-configuration "${SRC_CFG}"
+              --query "Service.Status" \
+              --output text)
+            
+            echo "Current service status: $SERVICE_STATUS"
+            
+            if [ "$SERVICE_STATUS" = "OPERATION_IN_PROGRESS" ]; then
+              echo "Service is currently updating. Waiting for operation to complete..."
+              aws apprunner wait service-updated --service-arn "${SVC_ARN}"
+              echo "Previous operation completed. Proceeding with update..."
+            fi
+            
+            echo "Updating existing App Runner service..."
+            # Retry logic for update operation
+            MAX_RETRIES=3
+            RETRY_COUNT=0
+            
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if aws apprunner update-service \
+                --service-arn "${SVC_ARN}" \
+                --source-configuration "${SRC_CFG}"; then
+                echo "Service updated successfully!"
+                break
+              else
+                RETRY_COUNT=$((RETRY_COUNT + 1))
+                if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                  WAIT_TIME=$((RETRY_COUNT * 30))
+                  echo "Update failed. Retrying in ${WAIT_TIME} seconds... (Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)"
+                  sleep $WAIT_TIME
+                  
+                  # Check if service is still in progress
+                  SERVICE_STATUS=$(aws apprunner describe-service \
+                    --service-arn "${SVC_ARN}" \
+                    --query "Service.Status" \
+                    --output text)
+                  
+                  if [ "$SERVICE_STATUS" = "OPERATION_IN_PROGRESS" ]; then
+                    echo "Service still in progress. Waiting for completion..."
+                    aws apprunner wait service-updated --service-arn "${SVC_ARN}"
+                  fi
+                else
+                  echo "Failed to update service after $MAX_RETRIES attempts"
+                  exit 1
+                fi
+              fi
+            done
           fi
 
       - name: Wait for service to be ready
