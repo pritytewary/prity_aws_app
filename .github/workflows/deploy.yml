@@ -2,25 +2,25 @@ name: Build & Deploy to App Runner (ECR)
 
 on:
   push:
-    branches: ["main"]
-  workflow_dispatch:
-
-env:
-  AWS_REGION: ${{ vars.AWS_REGION  }}
-  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
-  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-  SERVICE_NAME: ${{ vars.SERVICE_NAME }}
-  IMAGE_TAG: ${{ github.sha }}
-  GITHUB_ACTION_ROLE: P_GithubActionsAppRunnerDeployRole
-
-permissions:
-  id-token: write
-  contents: read
-
+    branches:
+      - main
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
+    environment: main
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION  }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      SERVICE_NAME: ${{ vars.SERVICE_NAME }}
+      IMAGE_TAG: ${{ github.sha }}
+      GITHUB_ACTION_ROLE: P_GithubActionsAppRunnerDeployRole
 
+    outputs:
+      service_url: ${{ steps.get-url.outputs.service_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
