@@ -10,6 +10,10 @@ app.get("/hello", (req, res) => {
   res.status(200).send("Hello World");
 });
 
+app.get("/test", (req, res) => {
+  res.status(200).send("Test");
+});
+
 // Root endpoint
 app.get("/", (req, res) => {
   res.json({
